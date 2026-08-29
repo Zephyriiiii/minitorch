@@ -1,6 +1,25 @@
 # minitorch
 The full minitorch student suite. 
 
+## Environment
+
+This checkout is configured for the CUDA 13.3 runtime and NVIDIA H20 GPUs on
+the current server. Create or update the project environment with:
+
+```bash
+source .venv/bin/activate
+python -m pip install -r requirements.txt
+python -m pip install -e .
+```
+
+Verify CUDA before running the GPU assignments:
+
+```bash
+python -c "from numba import cuda; print(cuda.is_available(), cuda.get_current_device())"
+python -m pytest -m task3_3 -q
+python -m pytest -m task3_4 -q
+```
+
 
 To access the autograder: 
 
