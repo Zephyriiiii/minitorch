@@ -1,4 +1,5 @@
 from argparse import ArgumentParser
+from functools import partial
 
 import streamlit as st
 from interface.streamlit_utils import get_img_tag
@@ -95,11 +96,29 @@ if module_selection == "Module 2":
 
 
 if module_selection == "Module 3":
-    from run_fast_tensor import FastTrain
+    from run_fast_tensor import (
+        CUDA_AVAILABLE,
+        FastTensorBackend,
+        FastTrain,
+        GPUBackend,
+    )
+
+    backend_labels = ["CPU (Numba)"]
+    if CUDA_AVAILABLE:
+        backend_labels.append("GPU (CUDA)")
+
+    backend_label = st.sidebar.radio(
+        "Compute backend",
+        backend_labels,
+        index=len(backend_labels) - 1,
+    )
+    backend = GPUBackend if backend_label == "GPU (CUDA)" else FastTensorBackend
+    configured_train = partial(FastTrain, backend=backend)
 
     def render_run_fast_interface():
         st.header("Module 3 - Efficient")
-        render_train_interface(FastTrain, False)
+        st.write(f"Compute backend: **{backend_label}**")
+        render_train_interface(configured_train, False)
 
     PAGES["Module 3: Efficient"] = render_run_fast_interface
 
