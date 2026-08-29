@@ -1,11 +1,14 @@
+from pathlib import Path
+
 from mnist import MNIST
 
 import minitorch
 
-mndata = MNIST("project/data/")
-images, labels = mndata.load_training()
+MNIST_DATA_DIR = Path(__file__).resolve().parent / "data"
+_mnist_training_data = None
 
-BACKEND = minitorch.TensorBackend(minitorch.FastOps)
+FastTensorBackend = minitorch.TensorBackend(minitorch.FastOps)
+BACKEND = FastTensorBackend
 BATCH = 16
 
 # Number of classes (10 digits)
@@ -15,16 +18,16 @@ C = 10
 H, W = 28, 28
 
 
-def RParam(*shape):
-    r = 0.1 * (minitorch.rand(shape, backend=BACKEND) - 0.5)
+def RParam(*shape, backend=BACKEND):
+    r = 0.1 * (minitorch.rand(shape, backend=backend) - 0.5)
     return minitorch.Parameter(r)
 
 
 class Linear(minitorch.Module):
-    def __init__(self, in_size, out_size):
+    def __init__(self, in_size, out_size, backend=BACKEND):
         super().__init__()
-        self.weights = RParam(in_size, out_size)
-        self.bias = RParam(out_size)
+        self.weights = RParam(in_size, out_size, backend=backend)
+        self.bias = RParam(out_size, backend=backend)
         self.out_size = out_size
 
     def forward(self, x):
@@ -35,10 +38,12 @@ class Linear(minitorch.Module):
 
 
 class Conv2d(minitorch.Module):
-    def __init__(self, in_channels, out_channels, kh, kw):
+    def __init__(self, in_channels, out_channels, kh, kw, backend=BACKEND):
         super().__init__()
-        self.weights = RParam(out_channels, in_channels, kh, kw)
-        self.bias = RParam(out_channels, 1, 1)
+        self.weights = RParam(
+            out_channels, in_channels, kh, kw, backend=backend
+        )
+        self.bias = RParam(out_channels, 1, 1, backend=backend)
 
     def forward(self, input):
         # ASSIGN4.5
@@ -62,29 +67,31 @@ class Network(minitorch.Module):
     7. Apply a logsoftmax over the class dimension.
     """
 
-    def __init__(self):
+    def __init__(self, backend=BACKEND):
         super().__init__()
+        self.backend = backend
 
         # For vis
         self.mid = None
         self.out = None
 
         # ASSIGN4.5
-        self.conv1 = Conv2d(1, 4, 3, 3)
-        self.conv2 = Conv2d(4, 8, 3, 3)
-        self.linear1 = Linear(392, 64)
-        self.linear2 = Linear(64, C)
+        self.conv1 = Conv2d(1, 4, 3, 3, backend)
+        self.conv2 = Conv2d(4, 8, 3, 3, backend)
+        self.linear1 = Linear(392, 64, backend)
+        self.linear2 = Linear(64, C, backend)
         # END ASSIGN4.5
 
     def forward(self, x):
         # ASSIGN4.5
+        batch_size = x.shape[0]
         x = self.conv1(x).relu()
         self.mid = x
         x = self.conv2(x).relu()
         self.out = x
         x = minitorch.avgpool2d(x, (4, 4))
-        x = self.linear1(x.view(BATCH, 392)).relu()
-        x = minitorch.dropout(x, 0.25, self.mode == "eval")
+        x = self.linear1(x.view(batch_size, 392)).relu()
+        x = minitorch.dropout(x, 0.25, ignore=not self.training)
         x = self.linear2(x)
         x = minitorch.logsoftmax(x, dim=1)
         return x
@@ -92,6 +99,17 @@ class Network(minitorch.Module):
 
 
 def make_mnist(start, stop):
+    global _mnist_training_data
+    if _mnist_training_data is None:
+        try:
+            _mnist_training_data = MNIST(str(MNIST_DATA_DIR)).load_training()
+        except FileNotFoundError as exc:
+            raise FileNotFoundError(
+                f"MNIST files were not found in {MNIST_DATA_DIR}. "
+                "Run `mnist_get_data.sh` from that directory first."
+            ) from exc
+
+    images, labels = _mnist_training_data
     ys = []
     X = []
     for i in range(start, stop):
@@ -108,18 +126,21 @@ def default_log_fn(epoch, total_loss, correct, total, losses, model):
 
 
 class ImageTrain:
-    def __init__(self):
-        self.model = Network()
+    def __init__(self, backend=BACKEND):
+        self.backend = backend
+        self.model = Network(backend)
 
     def run_one(self, x):
-        return self.model.forward(minitorch.tensor([x], backend=BACKEND))
+        return self.model.forward(
+            minitorch.tensor([x], backend=self.backend).view(1, 1, H, W)
+        )
 
     def train(
         self, data_train, data_val, learning_rate, max_epochs=500, log_fn=default_log_fn
     ):
         (X_train, y_train) = data_train
         (X_val, y_val) = data_val
-        self.model = Network()
+        self.model = Network(self.backend)
         model = self.model
         n_training_samples = len(X_train)
         optim = minitorch.SGD(self.model.parameters(), learning_rate)
@@ -131,23 +152,24 @@ class ImageTrain:
             for batch_num, example_num in enumerate(
                 range(0, n_training_samples, BATCH)
             ):
-
-                if n_training_samples - example_num <= BATCH:
-                    continue
+                batch_size = min(BATCH, n_training_samples - example_num)
+                optim.zero_grad()
                 y = minitorch.tensor(
-                    y_train[example_num : example_num + BATCH], backend=BACKEND
+                    y_train[example_num : example_num + batch_size],
+                    backend=self.backend,
                 )
                 x = minitorch.tensor(
-                    X_train[example_num : example_num + BATCH], backend=BACKEND
+                    X_train[example_num : example_num + batch_size],
+                    backend=self.backend,
                 )
                 x.requires_grad_(True)
                 y.requires_grad_(True)
                 # Forward
-                out = model.forward(x.view(BATCH, 1, H, W)).view(BATCH, C)
+                out = model.forward(x.view(batch_size, 1, H, W)).view(batch_size, C)
                 prob = (out * y).sum(1)
                 loss = -(prob / y.shape[0]).sum()
 
-                assert loss.backend == BACKEND
+                assert loss.backend == self.backend
                 loss.view(1).backward()
 
                 total_loss += loss[0]
@@ -158,20 +180,22 @@ class ImageTrain:
 
                 if batch_num % 5 == 0:
                     model.eval()
-                    # Evaluate on 5 held-out batches
-
+                    # Evaluate on one held-out batch.
                     correct = 0
-                    for val_example_num in range(0, 1 * BATCH, BATCH):
+                    validation_size = min(BATCH, len(X_val))
+                    if validation_size > 0:
                         y = minitorch.tensor(
-                            y_val[val_example_num : val_example_num + BATCH],
-                            backend=BACKEND,
+                            y_val[:validation_size],
+                            backend=self.backend,
                         )
                         x = minitorch.tensor(
-                            X_val[val_example_num : val_example_num + BATCH],
-                            backend=BACKEND,
+                            X_val[:validation_size],
+                            backend=self.backend,
                         )
-                        out = model.forward(x.view(BATCH, 1, H, W)).view(BATCH, C)
-                        for i in range(BATCH):
+                        out = model.forward(
+                            x.view(validation_size, 1, H, W)
+                        ).view(validation_size, C)
+                        for i in range(validation_size):
                             m = -1000
                             ind = -1
                             for j in range(C):
@@ -180,7 +204,14 @@ class ImageTrain:
                                     m = out[i, j]
                             if y[i, ind] == 1.0:
                                 correct += 1
-                    log_fn(epoch, total_loss, correct, BATCH, losses, model)
+                    log_fn(
+                        epoch,
+                        total_loss,
+                        correct,
+                        validation_size,
+                        losses,
+                        model,
+                    )
 
                     total_loss = 0.0
                     model.train()

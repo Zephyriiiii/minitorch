@@ -107,7 +107,10 @@ class Tensor:
         Returns:
              Converted to numpy array
         """
-        return self.contiguous()._tensor._storage.reshape(self.shape)
+        storage = self.contiguous()._tensor._storage
+        if self.backend.cuda:
+            storage = storage.copy_to_host()
+        return np.asarray(storage).reshape(self.shape)
 
     # Properties
     @property

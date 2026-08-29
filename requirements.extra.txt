@@ -1,7 +1,7 @@
 datasets==2.4.0
 embeddings==0.0.8
 networkx==2.8.8
-plotly==4.14.3
+plotly==5.24.1
 pydot==1.4.1
 python-mnist
 streamlit==1.12.0

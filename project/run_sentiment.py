@@ -5,19 +5,20 @@ import embeddings
 import minitorch
 from datasets import load_dataset
 
-BACKEND = minitorch.TensorBackend(minitorch.FastOps)
+FastTensorBackend = minitorch.TensorBackend(minitorch.FastOps)
+BACKEND = FastTensorBackend
 
 
-def RParam(*shape):
-    r = 0.1 * (minitorch.rand(shape, backend=BACKEND) - 0.5)
+def RParam(*shape, backend=BACKEND):
+    r = 0.1 * (minitorch.rand(shape, backend=backend) - 0.5)
     return minitorch.Parameter(r)
 
 
 class Linear(minitorch.Module):
-    def __init__(self, in_size, out_size):
+    def __init__(self, in_size, out_size, backend=BACKEND):
         super().__init__()
-        self.weights = RParam(in_size, out_size)
-        self.bias = RParam(out_size)
+        self.weights = RParam(in_size, out_size, backend=backend)
+        self.bias = RParam(out_size, backend=backend)
         self.out_size = out_size
 
     def forward(self, x):
@@ -28,10 +29,12 @@ class Linear(minitorch.Module):
 
 
 class Conv1d(minitorch.Module):
-    def __init__(self, in_channels, out_channels, kernel_width):
+    def __init__(self, in_channels, out_channels, kernel_width, backend=BACKEND):
         super().__init__()
-        self.weights = RParam(out_channels, in_channels, kernel_width)
-        self.bias = RParam(1, out_channels, 1)
+        self.weights = RParam(
+            out_channels, in_channels, kernel_width, backend=backend
+        )
+        self.bias = RParam(1, out_channels, 1, backend=backend)
 
     def forward(self, input):
         # ASSIGN4.5
@@ -60,14 +63,22 @@ class CNNSentimentKim(minitorch.Module):
         embedding_size=50,
         filter_sizes=[3, 4, 5],
         dropout=0.25,
+        backend=BACKEND,
     ):
         super().__init__()
         self.feature_map_size = feature_map_size
+        self.backend = backend
         # ASSIGN4.5
-        self.conv1 = Conv1d(embedding_size, feature_map_size, filter_sizes[0])
-        self.conv2 = Conv1d(embedding_size, feature_map_size, filter_sizes[1])
-        self.conv3 = Conv1d(embedding_size, feature_map_size, filter_sizes[2])
-        self.linear = Linear(feature_map_size, 1)
+        self.conv1 = Conv1d(
+            embedding_size, feature_map_size, filter_sizes[0], backend
+        )
+        self.conv2 = Conv1d(
+            embedding_size, feature_map_size, filter_sizes[1], backend
+        )
+        self.conv3 = Conv1d(
+            embedding_size, feature_map_size, filter_sizes[2], backend
+        )
+        self.linear = Linear(feature_map_size, 1, backend)
         self.dropout = dropout
         # END ASSIGN4.5
 
@@ -84,7 +95,7 @@ class CNNSentimentKim(minitorch.Module):
         # Max over each feature map
         x = minitorch.max(x1, 2) + minitorch.max(x2, 2) + minitorch.max(x3, 2)
         x = self.linear(x.view(x.shape[0], self.feature_map_size))
-        x = minitorch.dropout(x, self.dropout, self.mode == "eval")
+        x = minitorch.dropout(x, self.dropout, ignore=not self.training)
         # Apply sigmoid and view as batch size
         return x.sigmoid().view(x.shape[0])
         # END ASSIGN4.5
@@ -124,11 +135,9 @@ def default_log_fn(
     validation_accuracy,
 ):
     global best_val
-    best_val = (
-        best_val if best_val > validation_accuracy[-1] else validation_accuracy[-1]
-    )
     print(f"Epoch {epoch}, loss {train_loss}, train accuracy: {train_accuracy[-1]:.2%}")
-    if len(validation_predictions) > 0:
+    if validation_accuracy:
+        best_val = max(best_val, validation_accuracy[-1])
         print(f"Validation accuracy: {validation_accuracy[-1]:.2%}")
         print(f"Best Valid accuracy: {best_val:.2%}")
 
@@ -136,6 +145,7 @@ def default_log_fn(
 class SentenceSentimentTrain:
     def __init__(self, model):
         self.model = model
+        self.backend = model.backend
 
     def train(
         self,
@@ -162,11 +172,14 @@ class SentenceSentimentTrain:
             for batch_num, example_num in enumerate(
                 range(0, n_training_samples, batch_size)
             ):
+                optim.zero_grad()
                 y = minitorch.tensor(
-                    y_train[example_num : example_num + batch_size], backend=BACKEND
+                    y_train[example_num : example_num + batch_size],
+                    backend=self.backend,
                 )
                 x = minitorch.tensor(
-                    X_train[example_num : example_num + batch_size], backend=BACKEND
+                    X_train[example_num : example_num + batch_size],
+                    backend=self.backend,
                 )
                 x.requires_grad_(True)
                 y.requires_grad_(True)
@@ -185,16 +198,16 @@ class SentenceSentimentTrain:
 
             # Evaluate on validation set at the end of the epoch
             validation_predictions = []
-            if data_val is not None:
+            if data_val is not None and len(data_val[0]) > 0:
                 (X_val, y_val) = data_val
                 model.eval()
                 y = minitorch.tensor(
                     y_val,
-                    backend=BACKEND,
+                    backend=self.backend,
                 )
                 x = minitorch.tensor(
                     X_val,
-                    backend=BACKEND,
+                    backend=self.backend,
                 )
                 out = model.forward(x)
                 validation_predictions += get_predictions_array(y, out)

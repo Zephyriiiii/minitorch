@@ -23,8 +23,20 @@ def tile(input: Tensor, kernel: Tuple[int, int]) -> Tuple[Tensor, int, int]:
     kh, kw = kernel
     assert height % kh == 0
     assert width % kw == 0
-    # TODO: Implement for Task 4.3.
-    raise NotImplementedError('Need to implement for Task 4.3')
+    new_height = height // kh
+    new_width = width // kw
+
+    # Split each spatial dimension into (number of tiles, tile size), then
+    # place both tile dimensions at the end so a single reduction pools a
+    # complete kh x kw window.
+    tiled = input.contiguous().view(
+        batch, channel, new_height, kh, new_width, kw
+    )
+    tiled = tiled.permute(0, 1, 2, 4, 3, 5)
+    tiled = tiled.contiguous().view(
+        batch, channel, new_height, new_width, kh * kw
+    )
+    return tiled, new_height, new_width
 
 
 def avgpool2d(input: Tensor, kernel: Tuple[int, int]) -> Tensor:
@@ -39,8 +51,8 @@ def avgpool2d(input: Tensor, kernel: Tuple[int, int]) -> Tensor:
         Pooled tensor
     """
     batch, channel, height, width = input.shape
-    # TODO: Implement for Task 4.3.
-    raise NotImplementedError('Need to implement for Task 4.3')
+    tiled, new_height, new_width = tile(input, kernel)
+    return tiled.mean(4).view(batch, channel, new_height, new_width)
 
 
 max_reduce = FastOps.reduce(operators.max, -1e9)
@@ -59,7 +71,7 @@ def argmax(input: Tensor, dim: int) -> Tensor:
         :class:`Tensor` : tensor with 1 on highest cell in dim, 0 otherwise
 
     """
-    out = max_reduce(input, dim)
+    out = input.backend.max_reduce(input, dim)
     return out == input
 
 
@@ -67,14 +79,15 @@ class Max(Function):
     @staticmethod
     def forward(ctx: Context, input: Tensor, dim: Tensor) -> Tensor:
         "Forward of max should be max reduction"
-        # TODO: Implement for Task 4.4.
-        raise NotImplementedError('Need to implement for Task 4.4')
+        reduce_dim = int(dim.item())
+        ctx.save_for_backward(input, reduce_dim)
+        return input.backend.max_reduce(input, reduce_dim)
 
     @staticmethod
     def backward(ctx: Context, grad_output: Tensor) -> Tuple[Tensor, float]:
         "Backward of max should be argmax (see above)"
-        # TODO: Implement for Task 4.4.
-        raise NotImplementedError('Need to implement for Task 4.4')
+        input, dim = ctx.saved_values
+        return argmax(input, dim) * grad_output, 0.0
 
 
 def max(input: Tensor, dim: int) -> Tensor:
@@ -96,8 +109,9 @@ def softmax(input: Tensor, dim: int) -> Tensor:
     Returns:
         softmax tensor
     """
-    # TODO: Implement for Task 4.4.
-    raise NotImplementedError('Need to implement for Task 4.4')
+    shifted = input - max(input, dim)
+    numerator = shifted.exp()
+    return numerator / numerator.sum(dim)
 
 
 def logsoftmax(input: Tensor, dim: int) -> Tensor:
@@ -115,8 +129,8 @@ def logsoftmax(input: Tensor, dim: int) -> Tensor:
     Returns:
          log of softmax tensor
     """
-    # TODO: Implement for Task 4.4.
-    raise NotImplementedError('Need to implement for Task 4.4')
+    shifted = input - max(input, dim)
+    return shifted - shifted.exp().sum(dim).log()
 
 
 def maxpool2d(input: Tensor, kernel: Tuple[int, int]) -> Tensor:
@@ -131,8 +145,8 @@ def maxpool2d(input: Tensor, kernel: Tuple[int, int]) -> Tensor:
         Tensor : pooled tensor
     """
     batch, channel, height, width = input.shape
-    # TODO: Implement for Task 4.4.
-    raise NotImplementedError('Need to implement for Task 4.4')
+    tiled, new_height, new_width = tile(input, kernel)
+    return max(tiled, 4).view(batch, channel, new_height, new_width)
 
 
 def dropout(input: Tensor, rate: float, ignore: bool = False) -> Tensor:
@@ -147,5 +161,9 @@ def dropout(input: Tensor, rate: float, ignore: bool = False) -> Tensor:
     Returns:
         tensor with random positions dropped out
     """
-    # TODO: Implement for Task 4.4.
-    raise NotImplementedError('Need to implement for Task 4.4')
+    if ignore:
+        return input
+
+    assert 0.0 <= rate <= 1.0
+    mask = rand(input.shape, backend=input.backend) > rate
+    return input * mask

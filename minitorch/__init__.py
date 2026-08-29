@@ -4,6 +4,12 @@ import minitorch.scalar_functions as scalar_functions  # noqa: F401,F403
 
 from .autodiff import *  # noqa: F401,F403
 from .cuda_ops import *  # noqa: F401,F403
+from .cuda_conv import (  # noqa: F401
+    CudaConv1dFun,
+    CudaConv2dFun,
+    cuda_conv1d,
+    cuda_conv2d,
+)
 from .datasets import datasets  # noqa: F401,F403
 from .fast_conv import *  # noqa: F401,F403
 

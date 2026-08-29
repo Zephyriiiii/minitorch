@@ -80,8 +80,46 @@ def _tensor_conv1d(
     s1 = input_strides
     s2 = weight_strides
 
-    # TODO: Implement for Task 4.1.
-    raise NotImplementedError('Need to implement for Task 4.1')
+    s10, s11, s12 = s1[0], s1[1], s1[2]
+    s20, s21, s22 = s2[0], s2[1], s2[2]
+    o10, o11, o12 = out_strides[0], out_strides[1], out_strides[2]
+
+    # Each output element is independent, so the outer loop can be
+    # parallelized safely.  Computing the positions directly avoids index
+    # allocations in the hot loop and still supports non-contiguous tensors.
+    for ordinal in prange(out_size):
+        batch_index = ordinal // (out_channels * out_width)
+        position = ordinal % (out_channels * out_width)
+        out_channel = position // out_width
+        out_col = position % out_width
+
+        accumulator = 0.0
+        for in_channel in range(in_channels):
+            for kernel_col in range(kw):
+                if reverse:
+                    input_col = out_col - kernel_col
+                else:
+                    input_col = out_col + kernel_col
+
+                if 0 <= input_col < width:
+                    input_position = (
+                        batch_index * s10
+                        + in_channel * s11
+                        + input_col * s12
+                    )
+                    weight_position = (
+                        out_channel * s20
+                        + in_channel * s21
+                        + kernel_col * s22
+                    )
+                    accumulator += (
+                        input[input_position] * weight[weight_position]
+                    )
+
+        output_position = (
+            batch_index * o10 + out_channel * o11 + out_col * o12
+        )
+        out[output_position] = accumulator
 
 
 tensor_conv1d = njit(parallel=True)(_tensor_conv1d)
@@ -142,7 +180,13 @@ class Conv1dFun(Function):
         return grad_input, grad_weight
 
 
-conv1d = Conv1dFun.apply
+def conv1d(input: Tensor, weight: Tensor) -> Tensor:
+    """Dispatch 1D convolution to the backend used by ``input``."""
+    if input.backend.cuda:
+        from .cuda_conv import CudaConv1dFun
+
+        return CudaConv1dFun.apply(input, weight)
+    return Conv1dFun.apply(input, weight)
 
 
 def _tensor_conv2d(
@@ -206,8 +250,61 @@ def _tensor_conv2d(
     s10, s11, s12, s13 = s1[0], s1[1], s1[2], s1[3]
     s20, s21, s22, s23 = s2[0], s2[1], s2[2], s2[3]
 
-    # TODO: Implement for Task 4.2.
-    raise NotImplementedError('Need to implement for Task 4.2')
+    out_height, out_width = out_shape[2], out_shape[3]
+    o10, o11, o12, o13 = (
+        out_strides[0],
+        out_strides[1],
+        out_strides[2],
+        out_strides[3],
+    )
+
+    for ordinal in prange(out_size):
+        batch_index = ordinal // (out_channels * out_height * out_width)
+        position = ordinal % (out_channels * out_height * out_width)
+        out_channel = position // (out_height * out_width)
+        spatial_position = position % (out_height * out_width)
+        out_row = spatial_position // out_width
+        out_col = spatial_position % out_width
+
+        accumulator = 0.0
+        for in_channel in range(in_channels):
+            for kernel_row in range(kh):
+                if reverse:
+                    input_row = out_row - kernel_row
+                else:
+                    input_row = out_row + kernel_row
+
+                if 0 <= input_row < height:
+                    for kernel_col in range(kw):
+                        if reverse:
+                            input_col = out_col - kernel_col
+                        else:
+                            input_col = out_col + kernel_col
+
+                        if 0 <= input_col < width:
+                            input_position = (
+                                batch_index * s10
+                                + in_channel * s11
+                                + input_row * s12
+                                + input_col * s13
+                            )
+                            weight_position = (
+                                out_channel * s20
+                                + in_channel * s21
+                                + kernel_row * s22
+                                + kernel_col * s23
+                            )
+                            accumulator += (
+                                input[input_position] * weight[weight_position]
+                            )
+
+        output_position = (
+            batch_index * o10
+            + out_channel * o11
+            + out_row * o12
+            + out_col * o13
+        )
+        out[output_position] = accumulator
 
 
 tensor_conv2d = njit(parallel=True, fastmath=True)(_tensor_conv2d)
@@ -267,4 +364,10 @@ class Conv2dFun(Function):
         return grad_input, grad_weight
 
 
-conv2d = Conv2dFun.apply
+def conv2d(input: Tensor, weight: Tensor) -> Tensor:
+    """Dispatch 2D convolution to the backend used by ``input``."""
+    if input.backend.cuda:
+        from .cuda_conv import CudaConv2dFun
+
+        return CudaConv2dFun.apply(input, weight)
+    return Conv2dFun.apply(input, weight)

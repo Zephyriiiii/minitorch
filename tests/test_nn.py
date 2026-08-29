@@ -31,8 +31,28 @@ def test_avg(t: Tensor) -> None:
 @pytest.mark.task4_4
 @given(tensors(shape=(2, 3, 4)))
 def test_max(t: Tensor) -> None:
-    # TODO: Implement for Task 4.4.
-    raise NotImplementedError('Need to implement for Task 4.4')
+    for dim in range(t.dims):
+        out = minitorch.max(t, dim)
+        expected_shape = list(t.shape)
+        expected_shape[dim] = 1
+        assert out.shape == tuple(expected_shape)
+
+        for index in out._tensor.indices():
+            values = []
+            for reduce_index in range(t.shape[dim]):
+                input_index = list(index)
+                input_index[dim] = reduce_index
+                values.append(t[tuple(input_index)])
+            assert_close(out[index], max(values))
+
+
+
+@pytest.mark.task4_4
+def test_max_grad() -> None:
+    # Max is not differentiable at ties, so use distinct values for the
+    # numerical gradient comparison.
+    t = minitorch.tensor([float(i) for i in range(24)]).view(2, 3, 4)
+    minitorch.grad_check(lambda a: minitorch.max(a, dim=1), t)
 
 
 @pytest.mark.task4_4

@@ -124,10 +124,22 @@ if module_selection == "Module 3":
 
 if module_selection == "Module 4":
     from run_mnist_interface import render_run_image_interface
+    from run_fast_tensor import CUDA_AVAILABLE, FastTensorBackend, GPUBackend
     from sentiment_interface import render_run_sentiment_interface
 
-    PAGES["Module 4: Images"] = render_run_image_interface
-    PAGES["Module 4: Sentiment"] = render_run_sentiment_interface
+    backend_labels = ["CPU (Numba)"]
+    if CUDA_AVAILABLE:
+        backend_labels.append("GPU (CUDA)")
+
+    backend_label = st.sidebar.radio(
+        "Compute backend",
+        backend_labels,
+        index=len(backend_labels) - 1,
+    )
+    backend = GPUBackend if backend_label == "GPU (CUDA)" else FastTensorBackend
+
+    PAGES["Module 4: Images"] = lambda: render_run_image_interface(backend)
+    PAGES["Module 4: Sentiment"] = lambda: render_run_sentiment_interface(backend)
 
 
 PAGE_OPTIONS = list(PAGES.keys())

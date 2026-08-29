@@ -4,10 +4,10 @@ import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
-from run_mnist_multiclass import ImageTrain, make_mnist
+from run_mnist_multiclass import BACKEND, ImageTrain, make_mnist
 
 
-def render_run_image_interface():
+def render_run_image_interface(backend=BACKEND):
 
     st.markdown("### Dataset")
     n_training_samples = st.number_input(
@@ -45,9 +45,9 @@ def render_run_image_interface():
 
     if st_train_button.button("Train Model"):
         start_time = time.time()
-        train = ImageTrain()
+        train = ImageTrain(backend=backend)
 
-        def log_fn(epoch, total_loss, correct, losses, model):
+        def log_fn(epoch, total_loss, correct, total, losses, model):
             time_elapsed = time.time() - start_time
             st_progress.progress(epoch / max_epochs)
             time_per_epoch = time_elapsed / (epoch + 1)
@@ -59,7 +59,14 @@ def render_run_image_interface():
                     (max_epochs - epoch) * time_per_epoch,
                 )
             )
-            df.append({"epoch": epoch, "loss": total_loss, "correct": correct})
+            df.append(
+                {
+                    "epoch": epoch,
+                    "loss": total_loss,
+                    "correct": correct,
+                    "total": total,
+                }
+            )
             st_epoch_stats.write(pd.DataFrame(reversed(df)))
 
             # Visualize test batch

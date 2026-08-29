@@ -4,8 +4,12 @@ import embeddings
 import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
-from project.run_sentiment import CNNSentimentKim, encode_sentiment_data
-from run_sentiment import SentenceSentimentTrain
+from run_sentiment import (
+    BACKEND,
+    CNNSentimentKim,
+    SentenceSentimentTrain,
+    encode_sentiment_data,
+)
 
 from datasets import load_dataset
 
@@ -46,7 +50,7 @@ def load_data(dataset, n_train, n_val):
     )
 
 
-def render_run_sentiment_interface():
+def render_run_sentiment_interface(backend=BACKEND):
 
     st.header("Sentiment Classification")
     st.write(
@@ -112,6 +116,7 @@ def render_run_sentiment_interface():
                 feature_map_size=feature_map_size,
                 filter_sizes=[filter_size_1, filter_size_2, filter_size_3],
                 dropout=dropout,
+                backend=backend,
             )
         )
         start_time = time.time()
